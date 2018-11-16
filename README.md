@@ -626,3 +626,176 @@ $ docker image rm dockerfile-assignment-1
 # run the container again, but download the image from the docker hub
 $ docker run -p 80:3000 --rm rbatista/dockerfile-assignment-1
 ```
+
+# Container Lifetime & Persistent Data: Volumes, Volumes, Volumes
+
+- Containers are usually immutable and ephemeral (unchange and temporary/disposable)
+- "immutable infrastructure": only re-deploy containers, never change
+- This is the ideal scenario, but what about databases, or unique data?
+- Docker gives us features to ensure these "separation of concerns"
+- Two ways to deal with persistent data: Volumes and Bind Mounts
+  - Volumes: make special location outside od container UFS
+  - Bind Mounts: link container path to host path
+
+## Data Volumes
+
+```bash
+$ docker pull mysql
+
+$ docker image inspect mysql --format '{{ .ContainerConfig.Volumes }}'
+map[/var/lib/mysql:{}]
+
+$ docker container run -d --name mysql -e MYSQL_ALLOW_EMPTY_PASSWORD=True mysql
+
+$ docker container ls
+CONTAINER ID        IMAGE               COMMAND                  CREATED             STATUS              PORTS                 NAMES
+7d1cad7252dd        mysql               "docker-entrypoint.s…"   17 seconds ago      Up 17 seconds       3306/tcp, 33060/tcp   mysq
+
+# list the mysql container volumes config
+$ docker container inspect  --format '{{ .Config.Volumes }}'  mysql
+map[/var/lib/mysql:{}]
+
+# list the mysql container mounts
+docker container inspect  --format '{{json .Mounts}}'  mysql 
+[
+  {
+    "Type": "volume",
+    "Name": "00370257613ef42819c3c0f1e47493af3cbf5ace2394757acd4f63222db1b601",
+    "Source": "/var/lib/docker/volumes/00370257613ef42819c3c0f1e47493af3cbf5ace2394757acd4f63222db1b601/_data",
+    "Destination": "/var/lib/mysql",
+    "Driver": "local",
+    "Mode": "",
+    "RW": true,
+    "Propagation": ""
+  }
+]
+
+# list the volumes
+$ docker volume ls
+DRIVER              VOLUME NAME
+local               00370257613ef42819c3c0f1e47493af3cbf5ace2394757acd4f63222db1b601
+
+# inspect the volume
+$ docker volume inspect 00370257613ef42819c3c0f1e47493af3cbf5ace2394757acd4f63222db1b601 
+[
+    {
+        "CreatedAt": "2018-11-16T15:55:44-02:00",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/00370257613ef42819c3c0f1e47493af3cbf5ace2394757acd4f63222db1b601/_data",
+        "Name": "00370257613ef42819c3c0f1e47493af3cbf5ace2394757acd4f63222db1b601",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+
+# even if we remove the container...
+docker container rm -f mysql
+
+# ...the volume is not removed
+$ docker volume ls              
+DRIVER              VOLUME NAME
+local               00370257613ef42819c3c0f1e47493af3cbf5ace2394757acd4f63222db1b601
+```
+
+Named volumes: friendly way to assign volumes to containers
+```bash
+$ docker container run -d --name mysql -e MYSQL_ALLOW_EMPTY_PASSWORD=True -v mysql-db:/var/lib/mysql mysql
+b43dc501914209640750fe52832c9f699e3f192ba426e45c8a09fe67311927bd
+
+$ docker volume ls
+DRIVER              VOLUME NAME
+local               00370257613ef42819c3c0f1e47493af3cbf5ace2394757acd4f63222db1b601
+local               mysql-db
+
+$ docker volume inspect mysql-db 
+[
+    {
+        "CreatedAt": "2018-11-16T16:09:03-02:00",
+        "Driver": "local",
+        "Labels": null,
+        "Mountpoint": "/var/lib/docker/volumes/mysql-db/_data",
+        "Name": "mysql-db",
+        "Options": null,
+        "Scope": "local"
+    }
+]
+
+
+# run another container with the same volume
+$ docker container run -d --name mysql3 -e MYSQL_ALLOW_EMPTY_PASSWORD=True -v mysql-db:/var/lib/mysql mysql
+3b0f4b2eca6e38b10b7960977139abe9d875efe353985858da6627c04aabc79d
+
+$ docker container inspect --format '{{json .Mounts}}' mysql3
+[
+   {
+      "Type":"volume",
+      "Name":"mysql-db",
+      "Source":"/var/lib/docker/volumes/mysql-db/_data",
+      "Destination":"/var/lib/mysql",
+      "Driver":"local",
+      "Mode":"z",
+      "RW":true,
+      "Propagation":""
+   }
+]
+```
+
+`docker volume create`: required to do this before "docker run" to use custom drivers and labels
+
+# Bind Mounts
+ - Maps a host file or directory to a container file or directory
+ - Basically just two locations pointing to the same file(s)
+ - Again, skips UFS, and host files overwrite any in container
+ - Can't use in Dockerfile, must be at `container run`
+  - `... run -v /home/user/stuff:/path/container`
+
+At (https://github.com/BretFisher/udemy-docker-mastery/blob/master/dockerfile-sample-2/):
+```bash
+# bind the current directory to the nginx html directory, it should be full path
+$ docker container run -d --name nginx -p 80:80 -v "$(pwd)":/usr/share/nginx/html nginx
+```
+
+### Assignment: Named Volumes
+```bash
+# run postgres 9.6.1 container with a 'psql-data' volume
+docker run -d --name postgres9_6_1 -v psql-data:/var/lib/postgresql/data postgres:9.6.1
+The files belonging to this database system will be owned by user "postgres".
+This user must also own the server process.
+
+The database cluster will be initialized with locale "en_US.utf8".
+The default database encoding has accordingly been set to "UTF8".
+The default text search configuration will be set to "english".
+
+Data page checksums are disabled.
+
+fixing permissions on existing directory /var/lib/postgresql/data ... ok
+creating subdirectories ... ok
+selecting default max_connections ... 100
+selecting default shared_buffers ... 128MB
+selecting dynamic shared memory implementation ... posix
+creating configuration files ... ok
+running bootstrap script ... ok
+performing post-bootstrap initialization ... ok
+...
+LOG:  database system was shut down at 2018-11-16 18:43:49 UTC
+LOG:  MultiXact member wraparound protections are now enabled
+LOG:  database system is ready to accept connections
+LOG:  autovacuum launcher started
+
+# get initialization logs from container
+docker container logs postgres9_6_1
+
+# stop the container
+docker container stop postgres9_6_1
+
+# run a postgres container with newest version (9.6.2) with same 'psql-data' volume
+docker run -d --name postgres9_6_2 -v psql-data:/var/lib/postgresql/data postgres:9.6.2
+
+# get logs from the new container
+$ docker container logs postgres9_6_2
+LOG:  database system was shut down at 2018-11-16 19:53:40 UTC
+LOG:  MultiXact member wraparound protections are now enabled
+LOG:  database system is ready to accept connections
+LOG:  autovacuum launcher started
+```
