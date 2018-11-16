@@ -1,6 +1,7 @@
-Docker Mastery: The Complete Tollset From a Docker Captain
+Notes from the Course: Docker Mastery: The Complete Tollset From a Docker Captain
 ==========================================================
 Course: https://udemy.com/docker-mastery/
+Official Repo: https://github.com/BretFisher/udemy-docker-mastery
 
 # Creating and Using Containers
 ## Manage Multiple Containers
@@ -377,4 +378,251 @@ $ docker container run --rm --network search_net centos:7 curl -s search:9200
 
 # remove the elasticseach containers
 docker container rm -f elastic01 elastic02
+```
+
+# Container Images
+
+What's in an Image (And What Isn't)?
+ - App binaries and dependencies;
+ - Metadata about the image data and how to run the image
+ - Official Definition: "An image is an ordered collection of root filesystem changes and the corresponding execution parameters for use within a container runtime"
+
+- Not a complete OS. No kernel, kernel modules (e.g. drivers)
+- Small as one file (your app binary) like a golang static binary
+- Big as Ubuntu distro with apt, Apache, PHP, and more installed
+
+
+Docker hub (the apt package system for containers):
+https://hub.docker.com
+
+- Prefer the Official image (without the '/') or with the greatest PULL number (check the source code)
+- Alpine is a really small linux distribution
+- For production use a specific tag (e.g. nginx:1.11.9)
+
+## Image Layers
+
+ *Union file system*
+ Docker uses Unionfs to layer Docker images. As actions are done to a base image, layers are created and documented, such that each layer fully describes how to recreate an action. This strategy enables Docker's lightweight images, as only layer updates need to be propagated (compared to full VMs, for example)
+
+The command `docker image history` or the old way `docker history` show he layers of changes made in an image:
+```bash
+$ docker image history nginx
+IMAGE               CREATED             CREATED BY                                      SIZE                COMMENT
+62f816a209e6        9 days ago          /bin/sh -c #(nop)  CMD ["nginx" "-g" "daemon…   0B                  
+<missing>           9 days ago          /bin/sh -c #(nop)  STOPSIGNAL [SIGTERM]         0B                  
+<missing>           9 days ago          /bin/sh -c #(nop)  EXPOSE 80/tcp                0B                  
+<missing>           9 days ago          /bin/sh -c ln -sf /dev/stdout /var/log/nginx…   22B                 
+<missing>           9 days ago          /bin/sh -c set -x  && apt-get update  && apt…   53.8MB              
+<missing>           9 days ago          /bin/sh -c #(nop)  ENV NJS_VERSION=1.15.6.0.…   0B                  
+<missing>           9 days ago          /bin/sh -c #(nop)  ENV NGINX_VERSION=1.15.6-…   0B                  
+<missing>           4 weeks ago         /bin/sh -c #(nop)  LABEL maintainer=NGINX Do…   0B                  
+<missing>           4 weeks ago         /bin/sh -c #(nop)  CMD ["bash"]                 0B                  
+<missing>           4 weeks ago         /bin/sh -c #(nop) ADD file:f8f26d117bc4a9289…   55.3MB 
+```
+
+Every image starts from an empty `scratch` layer and every set of changes that happened after that on the file system in the image is another layer. There are some layers that does not affect the size of image, these are metadata change (e.g. CMD ["bash"], that defines the command that the image will run).
+
+Each layer is stored separately and identified by a unique sha. We never store the entire stack of image layers more than once, if there are the same layer. This saves storage space on the host and transfer time on push/pull images.
+
+When we run a container from a image, docker will create a new read/write layer for that container on top of that image. When the container do changes to the image files, the docker file system will do a *Copy On Write* and store a copy that file in the container layer.
+
+`docker image inspect`: return a JSON metadata about the image.
+
+
+## Image Tagging and Pushing to Docker Hub
+
+`docker image tag` (`docker tag` - old way): assign one or more tags to an image.
+
+Images are refered by `id` or by `<user>/<repository>:<tag>` (user is ommited if it is an official repository, tag is the latest if not specified).
+
+- Official repositories: they live at the _root namespace_ of the registry, so they don't need account name in front of the repo name.
+
+- The tag is a pointer to a specific image commit (much like git tags)
+
+```
+# retag an existent image
+$ docker image tag nginx rbatista/nginx
+
+# now the two tags point to the same docker image id
+$ docker image ls
+REPOSITORY                                 TAG                 IMAGE ID            CREATED             SIZE
+nginx                                      latest              62f816a209e6        9 days ago          109MB
+rbatista/nginx                             latest              62f816a209e6        9 days ago          109MB
+```
+
+`docker image push`: uploads changed layers to a image registry (default is Docker Hub) (similar to docker push --tags)
+
+```bash
+$ docker image push rbatista/nginx
+The push refers to repository [docker.io/rbatista/nginx]
+ad9ac0e6043b: Preparing 
+6ccbee34dd10: Preparing 
+237472299760: Preparing 
+denied: requested access to the resource is denied
+```
+
+You should login into the registry before push to it with `docker login [server-url]` (server-url defaults to docker hub).
+
+It will create a token auth under `~/.docker/config.json`
+```js
+{
+	"auths": {
+		"https://index.docker.io/v1/": {
+			"auth": "cmAaaAaaaAA9AAAAAAAaA999999"
+		}
+    }
+}
+```
+
+Now push again:
+```
+$ docker image push rbatista/nginx
+The push refers to repository [docker.io/rbatista/nginx]
+ad9ac0e6043b: Mounted from library/nginx 
+6ccbee34dd10: Mounted from library/nginx 
+237472299760: Mounted from library/postgres 
+latest: digest: sha256:427498d66ad8a3437939bb7ef613fe76458b550f6c43b915d8d4471c7d34a544 size: 948
+
+# create a new tag for the image
+$ docker tag rbatista/nginx rbatista/nginx:testing
+
+# push the new tag (it said that alreasy exists - existing layers will not be pushed again)
+$ docker image push rbatista/nginx:testing
+The push refers to repository [docker.io/rbatista/nginx]
+ad9ac0e6043b: Layer already exists 
+6ccbee34dd10: Layer already exists 
+237472299760: Layer already exists 
+testing: digest: sha256:427498d66ad8a3437939bb7ef613fe76458b550f6c43b915d8d4471c7d34a544 size: 948
+```
+
+## Building Images 
+
+### The Docker files basics
+
+[Doc](https://docs.docker.com/engine/reference/builder/)
+
+Dockerfiles are a recipe to create your docker images. Each line will create a image layer, so combine multiple commands (`&&`) in a single *line* will keep these commands in a single layer, it saves time and space.
+
+- `FROM`: All images must have a FROM, usually from a minimal Linux distribution like debian or (even better) alpine. If you truly want to start with an empty container, use FROM scratch
+- `ENV`: optional environment variable that's used in later lines and set as envar when container is running.
+- `RUN`: optional commands to run at shell inside container at build time
+- `EXPOSE`: expose ports on the docker virtual network, you still need to use -p or -P to open/fpward these ports on host
+- `CMD`: required, run this comand when container is lauched. Only one CMD allowed, so if there are multiple, last one wins
+- `WORKDIR`: change working directory (like a cd)
+- `ADD`: copies new files, directories or remote file URLs from `<src>` and adds them to the filesystem of the image at the path `<dest>`
+- `COPY`: copies new files or directories from `<src>` and adds them to the filesystem of the container at the path `<dest>`
+- `ENTRYPOINT`: allows you to configure a container that will run as an executable. Command line arguments to `docker run <image>` will be appended after all elements in an exec form ENTRYPOINT, and will override all elements specified using `CMD`
+
+
+*Important:* The right way to deal with logs is print them to /dev/stdout and /dev/stderr, because otherwise you will have problems to get these file logs out of the container.
+
+### Running Docker Builds
+
+The `docker image build [-f dockerfile-path] [context]` command builds an image from a Dockerfile and a context.
+
+Let's build this [dockerfile](https://raw.githubusercontent.com/BretFisher/udemy-docker-mastery/master/dockerfile-sample-1/Dockerfile) example.
+```bash
+$ ls
+Dockerfile
+
+# build a `Dockerfile` in the current path using the current directory (.) as the context to build the image, and tag this image as `customnginx`
+docker image build -t customnginx .
+```
+
+For each step in our dockerfile, docker created a layer and generated an id at end of each step it could ne saw:
+```
+...
+Step 5/7 : RUN ln -sf /dev/stdout /var/log/nginx/access.log 	&& ln -sf /dev/stderr /var/log/nginx/error.log
+ ---> Running in 16530b39eecf
+Removing intermediate container 16530b39eecf
+ ---> 962f787db785                                       <=============== HERE
+Step 6/7 : EXPOSE 80 443
+ ---> Running in 560ccadfdbe3
+Removing intermediate container 560ccadfdbe3
+ ---> 7bc976cdc645                                       <=============== HERE
+Step 7/7 : CMD ["nginx", "-g", "daemon off;"]
+ ---> Running in ee0677604435
+Removing intermediate container ee0677604435
+ ---> 90e023c23294                                       <=============== HERE
+Successfully built 90e023c23294
+Successfully tagged customnginx:latest
+```
+
+And when we change the docker file all layers before that change will remain the same (get from the cache) and docker will rebuild only the layers after that change. It will speedup the build process.
+
+```
+Step 5/7 : RUN ln -sf /dev/stdout /var/log/nginx/access.log 	&& ln -sf /dev/stderr /var/log/nginx/error.log
+ ---> Using cache                                           <==============  CACHE
+ ---> 962f787db785
+Step 6/7 : EXPOSE 80 443 8080
+ ---> Running in 86a2f267afed                               <==============  CHANGE
+Removing intermediate container 86a2f267afed
+ ---> 71b89a7cb22f
+Step 7/7 : CMD ["nginx", "-g", "daemon off;"]
+ ---> Running in e5251b12b0fc                               <==============  REBUILD AFTER CHANGE
+Removing intermediate container e5251b12b0fc
+ ---> 93172059ca51
+Successfully built 93172059ca51
+Successfully tagged customnginx:latest
+```
+
+This is why the order of the commands inside the dockerfile are important. The things that change less should be at top of your dockerfile and the things that change more, like your app code should be at the bottom.
+
+### Extending official images
+
+The [Dockerfile](https://raw.githubusercontent.com/BretFisher/udemy-docker-mastery/master/dockerfile-sample-2/Dockerfile) uses the official `nginx:latest` image as a base image.
+
+```bash
+$ docker image build -t nginx-with-html .
+Sending build context to Docker daemon  3.072kB
+Step 1/3 : FROM nginx:latest
+ ---> 62f816a209e6
+Step 2/3 : WORKDIR /usr/share/nginx/html
+ ---> Running in 6ea161c2311d
+Removing intermediate container 6ea161c2311d
+ ---> 4347632f24f0
+Step 3/3 : COPY index.html index.html
+ ---> 78e06ee69054
+Successfully built 78e06ee69054
+Successfully tagged nginx-with-html:latest
+
+$ docker container run -p 80:80 --rm nginx-with-html
+```
+
+### Assignment: Build Your Own Image
+
+[Dockerfile](./dockerfile-assignment-1/Dockerfile)
+
+```bash
+# build the image
+$ docker image build -t dockerfile-assignment-1 .
+
+# run the built image fowarding from container port 3000 to the host 80
+$ docker run -p 80:3000 --rm dockerfile-assignment-1:latest
+
+# create a tag with the repo owner
+$ docker image tag dockerfile-assignment-1:latest rbatista/dockerfile-assignment-1:latest
+
+# list the images
+$ docker image ls
+REPOSITORY                                 TAG                 IMAGE ID            CREATED             SIZE
+dockerfile-assignment-1                    latest              43c968bde5c2        6 minutes ago       62.9MB
+rbatista/dockerfile-assignment-1           latest              43c968bde5c2        6 minutes ago       62.9MB
+
+# push the image to docker hub
+$ docker image push rbatista/dockerfile-assignment-1:latest
+The push refers to repository [docker.io/rbatista/dockerfile-assignment-1]
+c3b28a194d68: Pushed 
+f1fb3ef3426d: Pushed 
+4a85f21815c0: Pushed 
+e56fda44d385: Mounted from library/node 
+4fb126c17f93: Mounted from library/node 
+a120b7c9a693: Mounted from library/node 
+latest: digest: sha256:d7edafbd19a363510a0770e31d59df71256280c3d3c897212b70a85f53f0b11b size: 1582
+
+# delete local cache of the image
+$ docker image rm dockerfile-assignment-1
+
+# run the container again, but download the image from the docker hub
+$ docker run -p 80:3000 --rm rbatista/dockerfile-assignment-1
 ```
