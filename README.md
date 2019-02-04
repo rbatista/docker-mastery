@@ -1,6 +1,7 @@
 Notes from the Course: Docker Mastery: The Complete Tollset From a Docker Captain
 ==========================================================
 Course: https://udemy.com/docker-mastery/
+
 Official Repo: https://github.com/BretFisher/udemy-docker-mastery
 
 # Creating and Using Containers
@@ -799,3 +800,218 @@ LOG:  MultiXact member wraparound protections are now enabled
 LOG:  database system is ready to accept connections
 LOG:  autovacuum launcher started
 ```
+
+# Docker Compose
+
+- Configure relationships between containers
+- Save our docker container run settings in easy-to-read file
+- crete one-liner developer environment startups
+- Comprised of 2 separated but related things:
+  1. YAML-formatted file thtat describes our solution option for
+    - containers
+    - networks
+    - volumes
+
+  2. A CLI tool `docker-compose`used for local dev/test automation with those YAML files
+
+## docker-compose.yaml
+
+- Compose YAML format it is versined: 1, 2, 2.1, 3, 3.1
+- YAML file can be ised with `docker-compose` command for local docker automation or ...
+- With `docker`directly in production with Swarm (as of v1.13)
+- `docker-compose --help`
+- `docker-compose.yml` is default filename, but any can be used with `docker-compose -f`
+
+## docker-compose CLI
+- CLI tool come with DOcker for Windows/Mac, but separate download for linux
+- Not production-grade tool but ideal for local development and test
+- Common commands are:
+  - `docker-compose up` # setup volumes/networks and start all containers
+  - `docker-compose down` # stop all containers and remove cont/vol/net
+  - `docker-compose build` or `docker-compose up --build` # build a custom image/build the images and execute up
+
+
+## compose-assignment-2
+
+```
+docker-compose up
+
+docker-compose down
+
+docker-compose up
+```
+
+# Swarn Mode: Built-in Orchestration
+ - Swarm Mode is a clustering solution built inside Docker
+ - Added in 1.12 (Summer 2016) via SwarmKit toolkit
+ - Enchanced in 1.13 (January 2017) via Stacks and Secretes
+ - Not enabled by default, new commands once enabled
+   - docker swarm
+   - docker node
+   - docker service
+   - docker stack
+   - docker secret
+
+![Swarm Orchestrator](./assets/docker-swarm-1.png)
+
+In Swarm there is Master and Worker nodes, each one these would be a virtual machine, or a physical host runnung some Linux distribution or Windows Server.
+
+The manager nodes have a local database on them known as the Raft Database. It stores their configuration and gives them all the information they need to have to be the authority inside a swarm. To ensure integrity and guarantee the trust all traffic are encripted.
+
+![Swarm Orchestrator](./assets/docker-swarm-2.png)
+
+ It is possible to promote or demote nodes. Managers are workers with permissions to control the swarm.
+
+![Swarm Orchestrator](./assets/docker-swarm-3.png)
+
+The `docker service` command replaces the `docker run` in the Swarm mode and allows us to add extra features to our containers when we run it, such as how many replicas we want to run. Those are know as tasks. A single service can have multiple tasks, and each one of those tasks will launch a container.
+
+## `docker swarm init`
+- Lots of PKI and security automation
+  - Root Signing Certificate created for the Swarm
+  - Certificate is issued for first Manager node
+  - Join tokens are created
+- Raft database created to store root CA, configs and secrets
+  - Encrypted by default on disk (1.13+)
+  - No need for another key/value system to hold orchestration/secrets
+  - Replicates logs amongst Managers via mutual TLS in "control plane"
+
+```
+$ docker swarm init
+Swarm initialized: current node (k0xohc7n0u664t1bvdt7a5o06) is now a manager.
+
+To add a worker to this swarm, run the following command:
+
+    docker swarm join --token SWMTKN-1-3u623hfvyw6g6wl4uch1mvozdws3b17yg5y1rj7tpwdctjh1yy-f24dscrf995cfxp65nrjob51n 10.102.26.104:2377
+
+To add a manager to this swarm, run 'docker swarm join-token manager' and follow the instructions.
+
+$ docker node ls
+ID                            HOSTNAME            STATUS              AVAILABILITY        MANAGER STATUS      ENGINE VERSION
+k0xohc7n0u664t1bvdt7a5o06 *   pop-os              Ready               Active              Leader              18.09.1
+
+
+$ docker service --help
+
+Usage:	docker service COMMAND
+
+Manage services
+
+Commands:
+  create      Create a new service
+  inspect     Display detailed information on one or more services
+  logs        Fetch the logs of a service or task
+  ls          List services
+  ps          List the tasks of one or more services
+  rm          Remove one or more services
+  rollback    Revert changes to a service's configuration
+  scale       Scale one or multiple replicated services
+  update      Update a service
+
+Run 'docker service COMMAND --help' for more information on a command.
+
+$ docker service create alpine ping 8.8.8.8
+jbyrqcxvbzso6jwssvipybrfr
+overall progress: 1 out of 1 tasks 
+1/1: running   [==================================================>] 
+verify: Service converged 
+
+
+$ docker service ls
+ID                  NAME                     MODE                REPLICAS            IMAGE               PORTS
+jbyrqcxvbzso        priceless_varahamihira   replicated          1/1                 alpine:latest       
+
+$ docker service ps priceless_varahamihira
+ID                  NAME                       IMAGE               NODE                DESIRED STATE       CURRENT STATE                ERROR               PORTS
+mvxka19d04u7        priceless_varahamihira.1   alpine:latest       pop-os              Running             Running about a minute ago                       
+
+
+$ docker service update jbyrqcxvbzso --replicas 3
+jbyrqcxvbzso
+overall progress: 3 out of 3 tasks 
+1/3: running   [==================================================>] 
+2/3: running   [==================================================>] 
+3/3: running   [==================================================>] 
+verify: Service converged 
+
+
+$ docker service ls
+ID                  NAME                     MODE                REPLICAS            IMAGE               PORTS
+jbyrqcxvbzso        priceless_varahamihira   replicated          3/3                 alpine:latest       
+
+$ docker service ps priceless_varahamihira
+ID                  NAME                       IMAGE               NODE                DESIRED STATE       CURRENT STATE            ERROR               PORTS
+mvxka19d04u7        priceless_varahamihira.1   alpine:latest       pop-os              Running             Running 3 minutes ago                        
+1eu7x780uq2t        priceless_varahamihira.2   alpine:latest       pop-os              Running             Running 50 seconds ago                       
+wdax9ar4973u        priceless_varahamihira.3   alpine:latest       pop-os              Running             Running 50 seconds ago                       
+
+
+$ docker container ls
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+b76d8ea0a4ae        alpine:latest       "ping 8.8.8.8"      4 minutes ago       Up 4 minutes                            priceless_varahamihira.3.wdax9ar4973uvukfl90wc92jd
+7285229b2293        alpine:latest       "ping 8.8.8.8"      4 minutes ago       Up 4 minutes                            priceless_varahamihira.2.1eu7x780uq2t71h5jvoqg3bp8
+b091a7823577        alpine:latest       "ping 8.8.8.8"      6 minutes ago       Up 6 minutes                            priceless_varahamihira.1.mvxka19d04u79v4u8w7g87tkq
+
+
+$ docker container rm -f priceless_varahamihira.1.mvxka19d04u79v4u8w7g87tkq
+priceless_varahamihira.1.mvxka19d04u79v4u8w7g87tkq
+
+$ docker service ls
+ID                  NAME                     MODE                REPLICAS            IMAGE               PORTS
+jbyrqcxvbzso        priceless_varahamihira   replicated          2/3                 alpine:latest    
+
+
+# swarm identify that the container is down and automatically starts a new one
+$ docker service ls
+ID                  NAME                     MODE                REPLICAS            IMAGE               PORTS
+jbyrqcxvbzso        priceless_varahamihira   replicated          3/3                 alpine:latest       
+
+# you can show the history of the tasks
+$ docker service ps priceless_varahamihira
+ID                  NAME                           IMAGE               NODE                DESIRED STATE       CURRENT STATE                ERROR                         PORTS
+q5bfv5j7n09y        priceless_varahamihira.1       alpine:latest       pop-os              Running             Running about a minute ago                                 
+mvxka19d04u7         \_ priceless_varahamihira.1   alpine:latest       pop-os              Shutdown            Failed 2 minutes ago         "task: non-zero exit (137)"   
+1eu7x780uq2t        priceless_varahamihira.2       alpine:latest       pop-os              Running             Running 7 minutes ago                                      
+wdax9ar4973u        priceless_varahamihira.3       alpine:latest       pop-os              Running             Running 7 minutes ago                                      
+
+
+$ docker service rm priceless_varahamihira 
+priceless_varahamihira
+
+$ docker container ls
+CONTAINER ID        IMAGE               COMMAND             CREATED             STATUS              PORTS               NAMES
+
+```
+
+```
+# on node 1
+$ docker swarm init --advertise-addr <Acessible IP Address>
+ docker swarm join --token SWMTKN-1-aaaaaaaaaaa IP:2377
+
+# on node 2
+$ docker swarm join --token ...
+This node joined a swarm as a worker
+
+# on manager (node1) promote node 2
+$ docker node update --role manager node2
+$ docker node ls
+$ docker swarm join-token manager
+docker swarm join --token SWMTKN-1-mmmmmmmmmmm IP:2377
+
+# on node 3
+$ docker swarm join --token SWMTKN-1-mmmmmmmmmmm IP:2377
+This node joined a swarm as a manager
+
+# on node 1
+$ docker service create --replicas 3 alpine ping 8.8.8.8
+
+# list containers running on local swarm node
+$ docker node ps
+
+# list containers running on node2
+$ docker node ps node2
+
+# list all tasks for the service and where them are running
+$ docker service ps <service_name>
+```
+
